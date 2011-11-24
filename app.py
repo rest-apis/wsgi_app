@@ -28,39 +28,52 @@ from uuid import uuid1
 from datetime import datetime
 import re, os
 
+
+class Request(dict):
+    def __init__(self, *args, **kwargs):
+        dict.__init__(self, *args, **kwargs)
+        self.__dict__ = self
+
+def echo(request):
+    return request.GET['with'][0] + '\n'
+
+def words(request, prefix):
+    limit = request.GET['limit'] if 'limit' in request.GET else 10
+    raw_results = os.popen("look %s"%prefix).readlines()[:limit]
+    return ",\n".join([word.replace('\n','') for word in raw_results])
+
 def application(environ, start_response): 
     
     #interpretamos el environ
-    path = environ['PATH_INFO']
-    method = environ['REQUEST_METHOD']
-    accept = environ['HTTP_ACCEPT'] if 'HTTP_ACCEPT' in environ else 'text/html'
-    POST, GET = {}, {}
-    if method == 'GET':
-        GET  = parse_qs(environ['QUERY_STRING'])
+    request = Request()
+    request.update({
+        'path'  : environ['PATH_INFO'],
+        'method': environ['REQUEST_METHOD'],
+        'accept': environ['HTTP_ACCEPT'] if 'HTTP_ACCEPT' in environ else 'text/html',
+        'GET'   : parse_qs(environ['QUERY_STRING']) if environ['REQUEST_METHOD'] == 'GET' else {}
+    })
 
     #reaccionamos a la ruta
     raw_response = ""
-    if path == '/echo':
-        raw_response = GET['with'][0] + '\n'
-    elif re.match(r'/words/with/\w+', path):
-        prefix = re.match(r'/words/with/(\w+)', path).group(1)
-        limit = GET['limit'] if 'limit' in GET else 10
-        raw_results = os.popen("look %s"%prefix).readlines()[:limit]
-        raw_response =  ",\n".join([word.replace('\n','') for word in raw_results])
+    if request.path == '/echo':
+        raw_response = echo(request)
+    elif re.match(r'/words/with/\w+', request.path):
+        prefix = re.match(r'/words/with/(\w+)', request.path).group(1)
+        raw_response = words(request, prefix)
     else:
         raw_response = """
                          No sé qué hacer con la ruta 
                          <strong>%s</strong>
-                       """ % path
+                       """ % request.path
     
-    if accept == 'text/plain':
+    if request.accept == 'text/plain':
         response = raw_response
     else:
         response = base % {'content': raw_response}
     #respondemos
     start_response(
           "200 OK",
-          [('Content-Type', accept),
+          [('Content-Type', request.accept),
            ('Content-Length', str(len(response)))]
           )
 
