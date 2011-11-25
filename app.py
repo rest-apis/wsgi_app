@@ -42,45 +42,47 @@ def words(request, prefix):
     raw_results = os.popen("look %s"%prefix).readlines()[:limit]
     return ",\n".join([word.replace('\n','') for word in raw_results])
 
-def application(environ, start_response): 
-    
-    #interpretamos el environ
-    request = Request()
-    request.update({
-        'path'  : environ['PATH_INFO'],
-        'method': environ['REQUEST_METHOD'],
-        'accept': environ['HTTP_ACCEPT'] if 'HTTP_ACCEPT' in environ else 'text/html',
-        'GET'   : parse_qs(environ['QUERY_STRING']) if environ['REQUEST_METHOD'] == 'GET' else {}
-    })
+class Application:
+    def __init__(self, routes):
+        self.routes = routes
+    def __call__(self, environ, start_response):
+        request = Request()
+        request.update({
+            'path'  : environ['PATH_INFO'],
+            'method': environ['REQUEST_METHOD'],
+            'accept': environ['HTTP_ACCEPT'] if 'HTTP_ACCEPT' in environ else 'text/html',
+            'GET'   : parse_qs(environ['QUERY_STRING']) if environ['REQUEST_METHOD'] == 'GET' else {}
+        })
+        raw_response = ""
+        for pattern, controller in self.routes.items():
+            they_match = re.match(pattern, request.path)
+            print they_match
+            if they_match:
+                raw_response = controller(request, **they_match.groupdict())
+                break
+            else:
+                raw_response = "No sé qué hacer con %s" % request.path
+        
+        if request.accept == 'text/plain':
+            response = raw_response
+        else:
+            response = base % {'content': raw_response}
+        
+        start_response(
+              "200 OK",
+              [('Content-Type', request.accept),
+               ('Content-Length', str(len(response)))]
+              )
 
-    #reaccionamos a la ruta
-    raw_response = ""
-    if request.path == '/echo':
-        raw_response = echo(request)
-    elif re.match(r'/words/with/\w+', request.path):
-        prefix = re.match(r'/words/with/(\w+)', request.path).group(1)
-        raw_response = words(request, prefix)
-    else:
-        raw_response = """
-                         No sé qué hacer con la ruta 
-                         <strong>%s</strong>
-                       """ % request.path
-    
-    if request.accept == 'text/plain':
-        response = raw_response
-    else:
-        response = base % {'content': raw_response}
-    #respondemos
-    start_response(
-          "200 OK",
-          [('Content-Type', request.accept),
-           ('Content-Length', str(len(response)))]
-          )
+        return [response]
+    def serve(self):
+        from wsgiref.simple_server import make_server
+        daemon = make_server('127.0.0.1', 8000, self)
+        daemon.serve_forever()
+        
+app = Application({
+    '/echo': echo,
+    '/words/with/(?P<prefix>\w+)': words
+})
 
-    return [response]
-
-from wsgiref.simple_server import make_server
-
-daemon = make_server('127.0.0.1', 8000, application)
-
-daemon.serve_forever()
+app.serve()
